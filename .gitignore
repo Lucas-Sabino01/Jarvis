@@ -31,3 +31,9 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### Banco de Dados H2 ###
+*.db
+*.mv.db
+*.trace.db
+jarvis_db*
