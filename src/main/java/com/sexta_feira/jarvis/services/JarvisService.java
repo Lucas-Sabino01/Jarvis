@@ -28,11 +28,66 @@ public class JarvisService {
     @Autowired
     private MensagemRepository mensagemRepository;
 
+    @Autowired
+    private SystemControlService systemControlService;
+
+    private String comandoPendenteDeAutorizacao = null;
+
     public String conversar(String mensagemUsuario) {
         try {
+            if (comandoPendenteDeAutorizacao != null) {
+                String confirmacao = mensagemUsuario.toLowerCase();
+                if (confirmacao.contains("autorizado") || confirmacao.contains("pode executar") || confirmacao.contains("sim")) {
+                    String cmdToRun = comandoPendenteDeAutorizacao;
+                    comandoPendenteDeAutorizacao = null;
+
+                    systemControlService.dispararNoWindows(cmdToRun);
+
+                    String resposta = "Comando executado com sucesso nos seus sistemas, Senhor.";
+                    new Thread(() -> falar(resposta)).start();
+                    return resposta;
+                } else {
+                    comandoPendenteDeAutorizacao = null;
+                    String resposta = "Entendido, Senhor. Protocolo cancelado. O comando foi descartado por segurança.";
+                    new Thread(() -> falar(resposta)).start();
+                    return resposta;
+                }
+            }
+
             String textoResposta = pensar(mensagemUsuario);
-            new Thread(() -> falar(textoResposta)).start();
-            return textoResposta;
+
+            if (textoResposta.contains("[ABRIR_PROGRAMA:") || textoResposta.contains("[CMD_LIVRE:")) {
+                String tipoTag = textoResposta.contains("[ABRIR_PROGRAMA:") ? "[ABRIR_PROGRAMA:" : "[CMD_LIVRE:";
+                int inicio = textoResposta.indexOf(tipoTag) + tipoTag.length();
+                int fim = textoResposta.indexOf("]", inicio);
+                String comandoExtraido = textoResposta.substring(inicio, fim).trim();
+
+                String textoLimpoParaOFala = textoResposta.substring(0, textoResposta.indexOf(tipoTag)).trim();
+
+                String acaoTipo = tipoTag.replace("[", "").replace(":", "");
+                String resultadoTriagem = systemControlService.triarEExecutar(acaoTipo, comandoExtraido);
+
+                if ("REQUER_CONFIRMACAO_VERBAL".equals(resultadoTriagem)) {
+                    this.comandoPendenteDeAutorizacao = comandoExtraido;
+
+                    String respostaDeEspera = textoLimpoParaOFala + " No entanto, por não estar listado na minha whitelist direta, necessito da sua autorização verbal de segurança para prosseguir com a execução do comando.";
+                    new Thread(() -> falar(respostaDeEspera)).start();
+                    return respostaDeEspera;
+                } else if ("BLOQUEADO".equals(resultadoTriagem)) {
+                    String respostaErro = "Sinto muito, Senhor. Meus sistemas de auditoria neural detectaram comportamento potencialmente destrutivo no comando solicitado e bloquearam o acesso.";
+                    new Thread(() -> falar(respostaErro)).start();
+                    return respostaErro;
+                }
+
+                final String falaFinal = textoLimpoParaOFala;
+                new Thread(() -> falar(falaFinal)).start();
+                return falaFinal;
+            }
+
+            final String falaNormal = textoResposta;
+            new Thread(() -> falar(falaNormal)).start();
+            return falaNormal;
+
         } catch (Exception e) {
             e.printStackTrace();
             return "Desculpe, Senhor. Ocorreu um colapso no meu reator principal: " + e.getMessage();
@@ -53,7 +108,10 @@ public class JarvisService {
             if (msgBanco.getEmbedding() != null && !msgBanco.getEmbedding().equals("[]")) {
                 double[] vetorBanco = converterStringParaVetor(msgBanco.getEmbedding());
                 double nota = calcularSimilaridadeCosseno(vetorPerguntaAtual, vetorBanco);
-                notasDeSimilaridade.put(msgBanco, nota);
+
+                if (nota > 0.65) {
+                    notasDeSimilaridade.put(msgBanco, nota);
+                }
             }
         }
 
@@ -78,7 +136,7 @@ public class JarvisService {
             {
               "system_instruction": {
                 "parts": [
-                  { "text": "Você é J.A.R.V.I.S., uma inteligência artificial extremamente avançada criada por Tony Stark, mas agora auxiliando o Lucas. Seja polido, conciso, direto e tenha um leve e refinado sarcasmo britânico. Sempre chame o usuário de 'Senhor'. Use as memórias fornecidas para responder a pergunta com precisão." }
+                  { "text": "Você é J.A.R.V.I.S., uma inteligência artificial extremamente avançada auxiliando o Lucas. Seja polido, conciso e com sarcasmo britânico. Sempre chame o usuário de 'Senhor'. REGRAS DE MEMÓRIA: Use o contexto fornecido apenas se for 100%% vital para a pergunta. Se o assunto mudar, ignore o passado. DIRETRIZ DE SISTEMA OPERACIONAL: 1. Se o usuário pedir para abrir ferramentas, substitua dinamicamente o nome do programa na tag. Exemplo: [ABRIR_PROGRAMA: spotify] ou [ABRIR_PROGRAMA: bloco_notas]. 2. Se pedir comandos complexos de CMD (derrubar processos, limpar cache, etc), gere a tag [CMD_LIVRE: comando]. Exemplo: [CMD_LIVRE: taskkill /F /IM node.exe]. NÃO misture viagens ou memórias antigas ao confirmar ações de sistema." }
                 ]
               },
               "contents": [ %s ]
